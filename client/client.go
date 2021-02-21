@@ -17,25 +17,33 @@ import (
 	"github.com/RoughIndustries/go_shopware/models"
 )
 
-const (
-	streakAPIBaseURL = "https://www.streak.com"
-)
-
 type Client struct {
-	privateToken string
+	privateToken       string
+	shopwareAPIBaseURL string
+	contextToken       string
+	Context            models.Context
 }
 
 type listOutputCallback func(v json.RawMessage) error
 
 // NewClient creates a new Streak API client instance.
-func NewClient(privateToken string) *Client {
-	return &Client{
-		privateToken: privateToken,
+func NewClient(shopwareAPIBaseURL string, privateToken string) *Client {
+
+	c := &Client{
+		shopwareAPIBaseURL: shopwareAPIBaseURL,
+		privateToken:       privateToken,
 	}
+	future := &models.Context{}
+	c.do("GET", "/store-api/v3/context", nil, future)
+	c.contextToken = future.Token
+	c.Context = *future
+
+	return c
+
 }
 
 func (c *Client) do(method, path string, input, output interface{}) error {
-	url := streakAPIBaseURL + path
+	url := c.shopwareAPIBaseURL + path
 
 	req, err := c.createRequest(method, url, input)
 	if err != nil {
@@ -53,7 +61,7 @@ func (c *Client) do(method, path string, input, output interface{}) error {
 }
 
 func (c *Client) doBytes(method, path string, input interface{}) ([]byte, error) {
-	url := streakAPIBaseURL + path
+	url := c.shopwareAPIBaseURL + path
 
 	req, err := c.createRequest(method, url, input)
 	if err != nil {
@@ -72,7 +80,7 @@ func (c *Client) doBytes(method, path string, input interface{}) ([]byte, error)
 }
 
 func (c *Client) doList(method, path string, input interface{}, outputCallback listOutputCallback) error {
-	nextURL := streakAPIBaseURL + path + "?results=25"
+	nextURL := c.shopwareAPIBaseURL + path + "?results=25"
 
 	for {
 		req, err := c.createRequest(method, nextURL, input)
@@ -156,7 +164,11 @@ func (c *Client) createRequest(method, url string, bodyObject interface{}) (req 
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Add("Authorization", "Basic "+basicAuth(c.privateToken, ""))
+	req.Header.Set("sw-access-key", c.privateToken)
+	if c.contextToken != "" {
+		req.Header.Set("sw-context-token", c.contextToken)
+	}
+	//req.Header.Add("Authorization", "Basic "+basicAuth(c.privateToken, ""))
 	//req.Header.Set("Authorization", "StreakToken "+c.privateToken)
 
 	// no keep-alive
@@ -189,6 +201,8 @@ func (c *Client) executeRequest(req *http.Request, output interface{}) (err erro
 
 	//log.Printf("Client.executeRequest() response: status=%q, body=%q", res.Status, string(resData))
 
+	resDataString := string(resData)
+	log.Println(resDataString)
 	if res.StatusCode >= 200 && res.StatusCode < 300 {
 		if output != nil && len(resData) > 0 {
 			if err := json.Unmarshal(resData, output); err != nil {
